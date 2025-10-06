@@ -2,6 +2,16 @@
 #include <vector>
 #include <cstdint>
 #include <algorithm>
+#include <cstring>
+
+// Функция для VarInt кодирования (сжатие чисел)
+void writeVarInt(std::vector<uint8_t>& result, uint32_t value) {
+    while (value >= 0x80) {
+        result.push_back(static_cast<uint8_t>(value | 0x80));
+        value >>= 7;
+    }
+    result.push_back(static_cast<uint8_t>(value));
+}
 
 std::vector<uint8_t> Graph::serialize() const {
     std::vector<uint8_t> result;
@@ -9,71 +19,41 @@ std::vector<uint8_t> Graph::serialize() const {
     // Заголовок: магия + версия
     const char magic[] = "GRAPH";
     result.insert(result.end(), magic, magic + 5);
-    result.push_back(1); // Версия
+    result.push_back(3); // версия 3 - с VarInt кодированием
 
     // Кол-во вершин и ребер
     uint32_t vertexCount = originalVertices_.size();
     uint32_t edgeCount = edges_.size();
 
-    // Запись кол-ва вершин и ребер
-    result.insert(result.end(), reinterpret_cast<const uint8_t*>(&vertexCount),
-                 reinterpret_cast<const uint8_t*>(&vertexCount) + 4);
-    result.insert(result.end(), reinterpret_cast<const uint8_t*>(&edgeCount),
-                 reinterpret_cast<const uint8_t*>(&edgeCount) + 4);
+    // Использование VarInt для размеров
+    writeVarInt(result, vertexCount);
+    writeVarInt(result, edgeCount);
 
-    // Запись вершин (ориг ID)
+    // Запись вершины (оригинальные ID) с VarInt
     for (uint32_t vertex : originalVertices_) {
-        result.insert(result.end(), reinterpret_cast<const uint8_t*>(&vertex),
-                     reinterpret_cast<const uint8_t*>(&vertex) + 4);
+        writeVarInt(result, vertex);
     }
 
-    // Создание списка смежности с новыми индексами
-    std::vector<std::vector<std::pair<uint32_t, uint8_t>>> adjacency(vertexCount);
+    // Запись ребра с VarInt кодированием
+    uint32_t prev_u = 0;
+    uint32_t prev_v = 0;
+
     for (const auto& edge : edges_) {
         uint32_t new_u = vertexMapping_.at(edge.u);
         uint32_t new_v = vertexMapping_.at(edge.v);
 
-        adjacency[new_u].emplace_back(new_v, edge.weight);
-        if (new_u != new_v) { // Учет петель (не дублируем)
-            adjacency[new_v].emplace_back(new_u, edge.weight);
+        // Запись всегда в порядке min-max
+        if (new_u > new_v) {
+            std::swap(new_u, new_v);
         }
-    }
 
-    // Сортировка списка смежностей
-    for (auto& list : adjacency) {
-        std::sort(list.begin(), list.end());
-    }
+        // Дельта-кодирование для вершин
+        writeVarInt(result, new_u - prev_u);
+        writeVarInt(result, new_v - prev_v);
+        result.push_back(edge.weight);
 
-    // Запись списков смежности с дельта-кодированием
-    for (uint32_t i = 0; i < vertexCount; ++i) {
-        const auto& neighbors = adjacency[i];
-
-        // Кол-во соседей
-        uint32_t neighborCount = neighbors.size();
-        result.insert(result.end(), reinterpret_cast<const uint8_t*>(&neighborCount),
-                     reinterpret_cast<const uint8_t*>(&neighborCount) + 4);
-
-        uint32_t prev_vertex = i; // Для дельта-кодирования
-        for (const auto& [neighbor, weight] : neighbors) {
-            // Дельта-кодирование: хранение разницы
-            uint32_t delta = neighbor - prev_vertex;
-            prev_vertex = neighbor;
-
-            // Использование переменной длины для дельт
-            if (delta < 128) {
-                result.push_back(static_cast<uint8_t>(delta));
-            } else if (delta < 16384) {
-                result.push_back(static_cast<uint8_t>((delta >> 8) | 0x80));
-                result.push_back(static_cast<uint8_t>(delta & 0xFF));
-            } else {
-                result.push_back(0xC0);
-                result.insert(result.end(), reinterpret_cast<const uint8_t*>(&delta),
-                             reinterpret_cast<const uint8_t*>(&delta) + 4);
-            }
-
-            // Вес
-            result.push_back(weight);
-        }
+        prev_u = new_u;
+        prev_v = new_v;
     }
 
     return result;
