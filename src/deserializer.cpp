@@ -4,78 +4,76 @@
 #include <cstdint>
 #include <stdexcept>
 
+// Функция для чтения VarInt
+uint32_t readVarInt(const std::vector<uint8_t>& data, size_t& pos) {
+    uint32_t result = 0;
+    int shift = 0;
+
+    while (true) {
+        if (pos >= data.size()) throw std::runtime_error("Unexpected end of data");
+        uint8_t byte = data[pos++];
+        result |= (byte & 0x7F) << shift;
+        if ((byte & 0x80) == 0) break;
+        shift += 7;
+    }
+
+    return result;
+}
+
 bool Graph::deserialize(const std::vector<uint8_t>& data) {
     edges_.clear();
     vertexMapping_.clear();
     originalVertices_.clear();
 
-    if (data.size() < 14) return false; // Минимальный размер заголовка
+    if (data.size() < 14) return false;
 
     // Проверка магии и версии
     if (data[0] != 'G' || data[1] != 'R' || data[2] != 'A' ||
-        data[3] != 'P' || data[4] != 'H' || data[5] != 1) {
+        data[3] != 'P' || data[4] != 'H') {
         return false;
     }
 
+    uint8_t version = data[5];
+    if (version != 3) return false; // Поддержка только версии 3
+
     size_t pos = 6;
 
-    // Чтение кол-ва вершин и ребер
-    if (pos + 8 > data.size()) return false;
+    try {
+        // Чтение кол-ва вершин и ребер через VarInt
+        uint32_t vertexCount = readVarInt(data, pos);
+        uint32_t edgeCount = readVarInt(data, pos);
 
-    uint32_t vertexCount, edgeCount;
-    memcpy(&vertexCount, &data[pos], 4);
-    pos += 4;
-    memcpy(&edgeCount, &data[pos], 4);
-    pos += 4;
+        // Чтение вершин
+        originalVertices_.resize(vertexCount);
+        for (uint32_t i = 0; i < vertexCount; ++i) {
+            originalVertices_[i] = readVarInt(data, pos);
+            vertexMapping_[originalVertices_[i]] = i;
+        }
 
-    // Чтение вершин
-    originalVertices_.resize(vertexCount);
-    if (pos + vertexCount * 4 > data.size()) return false;
+        // Чтение ребер
+        edges_.reserve(edgeCount);
+        uint32_t current_u = 0;
+        uint32_t current_v = 0;
 
-    for (uint32_t i = 0; i < vertexCount; ++i) {
-        memcpy(&originalVertices_[i], &data[pos], 4);
-        vertexMapping_[originalVertices_[i]] = i;
-        pos += 4;
-    }
-
-    // Восстанавление ребер из списков смежности
-    for (uint32_t i = 0; i < vertexCount; ++i) {
-        if (pos + 4 > data.size()) return false;
-
-        uint32_t neighborCount;
-        memcpy(&neighborCount, &data[pos], 4);
-        pos += 4;
-
-        uint32_t current_vertex = i;
-        for (uint32_t j = 0; j < neighborCount; ++j) {
+        for (uint32_t i = 0; i < edgeCount; ++i) {
             if (pos >= data.size()) return false;
 
-            // Чтение дельты
-            uint32_t delta;
-            uint8_t first_byte = data[pos++];
-
-            if ((first_byte & 0x80) == 0) {
-                delta = first_byte;
-            } else if ((first_byte & 0xC0) == 0x80) {
-                if (pos >= data.size()) return false;
-                delta = ((first_byte & 0x3F) << 8) | data[pos++];
-            } else {
-                if (pos + 4 > data.size()) return false;
-                memcpy(&delta, &data[pos], 4);
-                pos += 4;
-            }
+            // Чтение дельты и восстановление абсолютных значений
+            current_u += readVarInt(data, pos);
+            current_v += readVarInt(data, pos);
 
             if (pos >= data.size()) return false;
             uint8_t weight = data[pos++];
 
-            current_vertex += delta;
-            if (current_vertex >= vertexCount) return false;
-
-            // Добавление ребра (только в одном направлении, чтобы избежать дубликатов)
-            if (i <= current_vertex) {
-                edges_.push_back({originalVertices_[i], originalVertices_[current_vertex], weight});
+            // Восстановление оригинальных ID
+            if (current_u < vertexCount && current_v < vertexCount) {
+                edges_.push_back({originalVertices_[current_u], originalVertices_[current_v], weight});
+            } else {
+                return false;
             }
         }
+    } catch (const std::exception&) {
+        return false;
     }
 
     return true;
