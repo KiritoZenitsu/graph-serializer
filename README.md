@@ -3,17 +3,11 @@
 Решение задачи по сериализации графов для курса "Проектирование больших систем на C++".
 
 ## Сборка
-```
-g++ -std=c++17 -O3 -I include src/*.cpp -o run.exe
-```
-## Использование
 
-**Сериализация:**
-```
-run.exe -s -i input.tsv -o graph.bin
-```
+Проект использует CMake для сборки. Файл `CMakeLists.txt` уже настроен.
 
-**Десериализация:**
 ```
-run.exe -d -i graph.bin -o output.tsv
+mkdir build && cd build
+cmake ..
+make
 ```
