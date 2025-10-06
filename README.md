@@ -5,9 +5,3 @@
 ## Сборка
 
 Проект использует CMake для сборки. Файл `CMakeLists.txt` уже настроен.
-
-```
-mkdir build && cd build
-cmake ..
-make
-```
