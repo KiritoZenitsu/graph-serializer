@@ -29,12 +29,12 @@ std::vector<uint8_t> Graph::serialize() const {
     writeVarInt(result, vertexCount);
     writeVarInt(result, edgeCount);
 
-    // Запись вершины (оригинальные ID) с VarInt
+    // Запись вершин (оригинальные ID) с VarInt
     for (uint32_t vertex : originalVertices_) {
         writeVarInt(result, vertex);
     }
 
-    // Запись ребра с VarInt кодированием
+    // Запись ребер с VarInt кодированием
     uint32_t prev_u = 0;
     uint32_t prev_v = 0;
 
